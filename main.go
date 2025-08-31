@@ -81,7 +81,10 @@ func NewApp(cfg *config.Config, logger *zap.Logger) (*App, error) {
 	}
 
 	// Set Discord intents
-	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
+	// session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages
+	session.Identify.Intents = discordgo.IntentsGuilds |
+		discordgo.IntentsGuildMessages |
+		discordgo.IntentsMessageContent
 
 	// Initialize repository layer
 	customerRepo := repository.NewCustomerRepository(dbManager.GetDB(), logger)
@@ -89,13 +92,15 @@ func NewApp(cfg *config.Config, logger *zap.Logger) (*App, error) {
 	userRepo := repository.NewUserRepository(dbManager.GetDB(), logger)
 	issueRepo := repository.NewIssueRepository(dbManager.GetDB(), logger)
 	channelRepo := repository.NewChannelRepository(dbManager.GetDB(), logger)
+	issueAssigneeRepo := repository.NewIssueAssigneeRepository(dbManager.GetDB(), logger)
 
 	// Initialize service layer
 	issueService := service.NewIssueService(issueRepo, channelRepo, userRepo, logger)
 	channelService := service.NewChannelService(channelRepo, customerRepo, projectRepo, userRepo, logger)
+	issueAssigneeService := service.NewIssueAssigneeService(issueAssigneeRepo, userRepo, logger)
 
 	// Initialize transport layer
-	handler := discord.NewHandler(session, issueService, channelService, logger)
+	handler := discord.NewHandler(session, issueService, channelService, issueAssigneeService, logger)
 	cmdMgr := discord.NewCommandManager(session, logger)
 
 	return &App{

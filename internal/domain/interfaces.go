@@ -48,6 +48,12 @@ type IssueService interface {
 	// CloseIssue closes an issue
 	CloseIssue(ctx context.Context, id uuid.UUID) error
 
+	// OpenIssue opens an issue
+	OpenIssue(ctx context.Context, id uuid.UUID) error
+
+	// InProgressIssue starts working on an issue
+	InProgressIssue(ctx context.Context, id uuid.UUID) error
+
 	// ReopenIssue reopens a closed issue
 	ReopenIssue(ctx context.Context, id uuid.UUID) error
 
@@ -59,6 +65,9 @@ type IssueService interface {
 
 	// SetThreadInfo sets the thread and message IDs for an issue
 	SetThreadInfo(ctx context.Context, id uuid.UUID, threadID, messageID string) error
+
+	// UpdateIssueMessageID updates just the message ID for an issue
+	UpdateIssueMessageID(ctx context.Context, id uuid.UUID, messageID string) error
 }
 
 // DiscordHandler defines the interface for Discord interaction handling
@@ -269,7 +278,7 @@ type IssueAssigneeRepository interface {
 
 // IssueAssigneeService defines the interface for issue assignee business logic
 type IssueAssigneeService interface {
-	AssignUserToIssue(ctx context.Context, issueID, userID uuid.UUID, role AssigneeRole) (*IssueAssignee, error)
+	AssignUserToIssue(ctx context.Context, issueID uuid.UUID, discordID string, role AssigneeRole) (*IssueAssignee, error)
 	UnassignUserFromIssue(ctx context.Context, issueID, userID uuid.UUID, role AssigneeRole) error
 	UnassignAllUsersFromIssue(ctx context.Context, issueID uuid.UUID) error
 	GetIssueAssignees(ctx context.Context, issueID uuid.UUID) ([]*IssueAssignee, error)

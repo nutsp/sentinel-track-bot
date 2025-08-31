@@ -108,7 +108,7 @@ func (s *issueService) CreateIssue(ctx context.Context, title, description, imag
 		Description: strings.TrimSpace(description),
 		ImageURL:    strings.TrimSpace(imageURL),
 		Priority:    domain.PriorityMedium,        // Default priority
-		Status:      domain.StatusOpen,            // Default status
+		Status:      domain.StatusDraft,           // Default status
 		Source:      string(domain.SourceDiscord), // Mark as Discord issue
 		PublicHash:  uuid.New().String(),
 	}
@@ -342,6 +342,16 @@ func (s *issueService) GetClosedIssues(ctx context.Context) ([]*domain.Issue, er
 	return issues, nil
 }
 
+// OpenIssue opens an issue
+func (s *issueService) OpenIssue(ctx context.Context, id uuid.UUID) error {
+	return s.UpdateIssueStatus(ctx, id, domain.StatusOpen)
+}
+
+// InProgressIssue starts working on an issue
+func (s *issueService) InProgressIssue(ctx context.Context, id uuid.UUID) error {
+	return s.UpdateIssueStatus(ctx, id, domain.StatusInProgress)
+}
+
 // CloseIssue closes an issue
 func (s *issueService) CloseIssue(ctx context.Context, id uuid.UUID) error {
 	return s.UpdateIssueStatus(ctx, id, domain.StatusClosed)
@@ -365,6 +375,43 @@ func (s *issueService) ReopenIssue(ctx context.Context, id uuid.UUID) error {
 // SetThreadInfo sets the thread and message IDs for an issue (alias for UpdateIssueThreadInfo)
 func (s *issueService) SetThreadInfo(ctx context.Context, id uuid.UUID, threadID, messageID string) error {
 	return s.UpdateIssueThreadInfo(ctx, id, threadID, messageID)
+}
+
+// UpdateIssueMessageID updates just the message ID for an issue
+func (s *issueService) UpdateIssueMessageID(ctx context.Context, id uuid.UUID, messageID string) error {
+	s.logger.Debug("Updating issue message ID",
+		zap.String("issue_id", id.String()),
+		zap.String("message_id", messageID),
+	)
+
+	// Get issue
+	issue, err := s.issueRepo.GetByID(ctx, id)
+	if err != nil {
+		s.logger.Error("Failed to get issue for message ID update",
+			zap.Error(err),
+			zap.String("issue_id", id.String()),
+		)
+		return fmt.Errorf("failed to get issue for message ID update: %w", err)
+	}
+
+	// Update only message ID (preserve thread ID)
+	issue.MessageID = messageID
+
+	if err := s.issueRepo.Update(ctx, issue); err != nil {
+		s.logger.Error("Failed to update issue message ID",
+			zap.Error(err),
+			zap.String("issue_id", id.String()),
+			zap.String("message_id", messageID),
+		)
+		return fmt.Errorf("failed to update issue message ID: %w", err)
+	}
+
+	s.logger.Info("Issue message ID updated successfully",
+		zap.String("issue_id", id.String()),
+		zap.String("message_id", messageID),
+	)
+
+	return nil
 }
 
 // CreateWebIssue creates a new issue from web portal

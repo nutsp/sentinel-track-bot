@@ -14,19 +14,21 @@ import (
 
 // Handler handles Discord interactions
 type Handler struct {
-	session        *discordgo.Session
-	issueService   domain.IssueService
-	channelService domain.ChannelService
-	logger         *zap.Logger
+	session              *discordgo.Session
+	issueService         domain.IssueService
+	channelService       domain.ChannelService
+	issueAssigneeService domain.IssueAssigneeService
+	logger               *zap.Logger
 }
 
 // NewHandler creates a new Discord handler
-func NewHandler(session *discordgo.Session, issueService domain.IssueService, channelService domain.ChannelService, logger *zap.Logger) *Handler {
+func NewHandler(session *discordgo.Session, issueService domain.IssueService, channelService domain.ChannelService, issueAssigneeService domain.IssueAssigneeService, logger *zap.Logger) *Handler {
 	return &Handler{
-		session:        session,
-		issueService:   issueService,
-		channelService: channelService,
-		logger:         logger,
+		session:              session,
+		issueService:         issueService,
+		channelService:       channelService,
+		issueAssigneeService: issueAssigneeService,
+		logger:               logger,
 	}
 }
 
@@ -93,7 +95,6 @@ func (h *Handler) handleSlashCommand(ctx context.Context, i *discordgo.Interacti
 	switch commandName {
 	case "issue":
 		h.handleIssueCommand(ctx, i)
-
 	case "issues":
 		h.handleIssuesCommand(ctx, i)
 	case "issue-status":
@@ -703,40 +704,19 @@ func (h *Handler) handleIssueModalSubmit(ctx context.Context, i *discordgo.Inter
 		return
 	}
 
-	// Generate issue ID for display
-	displayID := domain.GenerateIssueID()
+	// Create issue card with action buttons
+	embed, components := CreateIssueCard(issue)
 
-	// Create the main issue message
-	mainContent := fmt.Sprintf("🎫 **New Issue: %s**\n\n**Issue ID:** %s\n**Description:** %s\n**Reporter:** <@%s>",
-		title, displayID, description, i.Member.User.ID)
-
-	// Create embeds for image if provided
-	var embeds []*discordgo.MessageEmbed
+	// Add image to embed if provided
 	if imageURL != "" {
-		embeds = []*discordgo.MessageEmbed{
-			{
-				Title: "Issue Screenshot",
-				Image: &discordgo.MessageEmbedImage{URL: imageURL},
-				Color: 0x3498db,
-			},
-		}
+		embed.Image = &discordgo.MessageEmbedImage{URL: imageURL}
 	}
 
-	// Create message with close button
+	// Create message with issue card
 	message, err := h.session.ChannelMessageSendComplex(i.ChannelID, &discordgo.MessageSend{
-		Content: mainContent,
-		Embeds:  embeds,
-		Components: []discordgo.MessageComponent{
-			discordgo.ActionsRow{
-				Components: []discordgo.MessageComponent{
-					discordgo.Button{
-						Label:    "🔒 Close Issue",
-						Style:    discordgo.DangerButton,
-						CustomID: fmt.Sprintf("close_issue_%s", issue.ID.String()),
-					},
-				},
-			},
-		},
+		Content:    fmt.Sprintf("🎫 **#%s**\n<@%s> reported a new issue:", issue.ID.String(), i.Member.User.ID),
+		Embeds:     []*discordgo.MessageEmbed{embed},
+		Components: components,
 	})
 	if err != nil {
 		h.logger.Error("Failed to send issue message", zap.Error(err))
@@ -744,49 +724,13 @@ func (h *Handler) handleIssueModalSubmit(ctx context.Context, i *discordgo.Inter
 		return
 	}
 
-	// Create thread for discussion
-	thread, err := h.session.MessageThreadStart(i.ChannelID, message.ID, fmt.Sprintf("Issue: %s", title), 60)
-	if err != nil {
-		h.logger.Error("Failed to create thread", zap.Error(err))
-		// Continue without thread
-	} else {
-		// Update issue with thread and message info
-		if err := h.issueService.SetThreadInfo(ctx, issue.ID, thread.ID, message.ID); err != nil {
-			h.logger.Error("Failed to update issue thread info", zap.Error(err))
-		}
-
-		// Update button with thread ID
-		components := []discordgo.MessageComponent{
-			discordgo.ActionsRow{
-				Components: []discordgo.MessageComponent{
-					discordgo.Button{
-						Label:    "🔒 Close Issue",
-						Style:    discordgo.DangerButton,
-						CustomID: fmt.Sprintf("close_issue_%s_%s", issue.ID.String(), thread.ID),
-					},
-				},
-			},
-		}
-
-		if _, err := h.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
-			Channel:    i.ChannelID,
-			ID:         message.ID,
-			Content:    &mainContent,
-			Embeds:     &embeds,
-			Components: &components,
-		}); err != nil {
-			h.logger.Error("Failed to update message with thread ID", zap.Error(err))
-		}
-
-		// Add priority selection in thread
-		h.sendPrioritySelector(ctx, thread.ID, issue.ID.String())
-
-		// Send welcome message in thread
-		h.sendMessage(ctx, thread.ID, fmt.Sprintf("💬 Discussion thread for Issue **%s**\n\nFeel free to add comments, updates, or additional information here.", displayID))
+	// Always store the main message ID for future updates
+	if err := h.issueService.UpdateIssueMessageID(ctx, issue.ID, message.ID); err != nil {
+		h.logger.Error("Failed to store message ID for issue", zap.Error(err))
 	}
 
 	// Update the original response
-	h.editInteractionResponse(ctx, i, fmt.Sprintf("✅ Issue **%s** created successfully!", displayID))
+	h.editInteractionResponse(ctx, i, fmt.Sprintf("✅ Issue **%s** created successfully!", issue.PublicHash))
 }
 
 // handleMessageComponent handles button clicks and select menu interactions
@@ -798,20 +742,143 @@ func (h *Handler) handleMessageComponent(ctx context.Context, i *discordgo.Inter
 		zap.String("user_id", i.Member.User.ID),
 	)
 
-	// Handle close issue button
-	if strings.HasPrefix(customID, "close_issue_") {
+	// Handle workflow buttons
+	switch {
+	case strings.HasPrefix(customID, "open_issue_"):
+		h.handleOpenIssueButton(ctx, i)
+	case strings.HasPrefix(customID, "start_work_"):
+		h.handleStartWorkButton(ctx, i)
+	// case strings.HasPrefix(customID, "resolve_issue_"):
+	// 	h.handleResolveIssueButton(ctx, i)
+	// case strings.HasPrefix(customID, "assign_qa_"):
+	// 	h.handleAssignQAButton(ctx, i)
+	// case strings.HasPrefix(customID, "verify_issue_"):
+	// 	h.handleVerifyIssueButton(ctx, i)
+	// case strings.HasPrefix(customID, "reject_issue_"):
+	// 	h.handleRejectIssueButton(ctx, i)
+	case strings.HasPrefix(customID, "close_issue_"):
 		h.handleCloseIssueButton(ctx, i)
-		return
-	}
+	// case strings.HasPrefix(customID, "reopen_issue_"):
+	// 	h.handleReopenIssueButton(ctx, i)
+	// case strings.HasPrefix(customID, "issue_details_"):
+	// 	h.handleIssueDetailsButton(ctx, i)
+	// case strings.HasPrefix(customID, "issue_history_"):
+	// 	h.handleIssueHistoryButton(ctx, i)
+	// case strings.HasPrefix(customID, "back_to_open_"):
+	// 	h.handleBackToOpenButton(ctx, i)
 
-	// Handle priority selection
-	if strings.HasPrefix(customID, "issue_priority_") {
+	case strings.HasPrefix(customID, "issue_priority_"):
 		h.handlePrioritySelection(ctx, i)
+	case strings.HasPrefix(customID, "issue_assignee_dev_"):
+		h.handleAssigneeDeveloperSelection(ctx, i)
+	case strings.HasPrefix(customID, "issue_assignee_qa_"):
+		h.handleAssigneeQASelection(ctx, i)
+	default:
+		h.logger.Warn("Unknown message component", zap.String("custom_id", customID))
+		h.respondToInteraction(ctx, i, "Unknown action", true)
+	}
+}
+
+// handleOpenIssueButton handles the open issue button click
+func (h *Handler) handleOpenIssueButton(ctx context.Context, i *discordgo.InteractionCreate) {
+	parts := strings.Split(i.MessageComponentData().CustomID, "_")
+	if len(parts) < 3 {
+		h.logger.Error("Invalid close button custom ID")
+		h.respondToInteraction(ctx, i, "Invalid button action", true)
 		return
 	}
 
-	h.logger.Warn("Unknown message component", zap.String("custom_id", customID))
-	h.respondToInteraction(ctx, i, "Unknown action", true)
+	issueIDStr := parts[2]
+	issueID, err := uuid.Parse(issueIDStr)
+	if err != nil {
+		h.logger.Error("Invalid issue ID in button", zap.Error(err))
+		h.respondToInteraction(ctx, i, "Invalid issue ID", true)
+		return
+	}
+
+	// Get issue from service
+	issue, err := h.issueService.GetIssue(ctx, issueID)
+	if err != nil {
+		h.logger.Error("Failed to get issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to get issue", true)
+		return
+	}
+
+	// Open the issue through service
+	if err := h.issueService.OpenIssue(ctx, issueID); err != nil {
+		h.logger.Error("Failed to open issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to open issue", true)
+		return
+	}
+
+	// Respond to user
+	h.respondToInteraction(ctx, i, "Opening issue...", true)
+
+	// Get updated issue and refresh the main issue card
+	if updatedIssue, err := h.issueService.GetIssue(ctx, issueID); err == nil {
+		h.updateIssueCard(ctx, issue.Channel.DiscordChannelID, updatedIssue)
+	}
+
+	// Create thread for discussion
+	thread, err := h.session.MessageThreadStart(i.ChannelID, issue.MessageID, fmt.Sprintf("Issue: %s", issue.Title), 60)
+	if err != nil {
+		h.logger.Error("Failed to create thread", zap.Error(err))
+		// Continue without thread
+	} else {
+		// Update issue with thread and message info
+		if err := h.issueService.SetThreadInfo(ctx, issue.ID, thread.ID, issue.MessageID); err != nil {
+			h.logger.Error("Failed to update issue thread info", zap.Error(err))
+		}
+
+		// Add priority selection in thread
+		h.sendPrioritySelector(ctx, thread.ID, issue.ID.String())
+		h.sendAssigneeDeveloperSelector(ctx, thread.ID, issue.ID.String())
+		h.sendAssigneeQASelector(ctx, thread.ID, issue.ID.String())
+
+		// Send welcome message in thread
+		h.sendMessage(ctx, thread.ID, fmt.Sprintf("💬 Discussion thread for Issue **%s**\n\nFeel free to add comments, updates, or additional information here.", issue.PublicHash))
+	}
+}
+
+// handleStartWorkButton handles the start work button click
+func (h *Handler) handleStartWorkButton(ctx context.Context, i *discordgo.InteractionCreate) {
+	parts := strings.Split(i.MessageComponentData().CustomID, "_")
+	if len(parts) < 3 {
+		h.logger.Error("Invalid close button custom ID")
+		h.respondToInteraction(ctx, i, "Invalid button action", true)
+		return
+	}
+
+	issueIDStr := parts[2]
+	issueID, err := uuid.Parse(issueIDStr)
+	if err != nil {
+		h.logger.Error("Invalid issue ID in button", zap.Error(err))
+		h.respondToInteraction(ctx, i, "Invalid issue ID", true)
+		return
+	}
+
+	// Get issue from service
+	issue, err := h.issueService.GetIssue(ctx, issueID)
+	if err != nil {
+		h.logger.Error("Failed to get issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to get issue", true)
+		return
+	}
+
+	// Start work on the issue through service
+	if err := h.issueService.InProgressIssue(ctx, issueID); err != nil {
+		h.logger.Error("Failed to start work", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to start work", true)
+		return
+	}
+
+	// Respond to user
+	h.respondToInteraction(ctx, i, "Starting work...", true)
+
+	// Get updated issue and refresh the main issue card
+	if updatedIssue, err := h.issueService.GetIssue(ctx, issueID); err == nil {
+		h.updateIssueCard(ctx, issue.Channel.DiscordChannelID, updatedIssue)
+	}
 }
 
 // handleCloseIssueButton handles the close issue button click
@@ -926,29 +993,188 @@ func (h *Handler) handlePrioritySelection(ctx context.Context, i *discordgo.Inte
 		},
 	}
 
-	// Update the message to disable the selector
-	newContent := fmt.Sprintf("📊 **Priority set to %s %s**",
-		func() string {
-			switch priority {
-			case domain.PriorityLow:
-				return "🟢"
-			case domain.PriorityHigh:
-				return "🔴"
-			default:
-				return "🟡"
-			}
-		}(), strings.Title(priorityStr))
+	// Get updated issue from service
+	issue, err := h.issueService.GetIssue(ctx, issueID)
+	if err != nil {
+		h.logger.Error("Failed to get updated issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to get updated issue", true)
+		return
+	}
 
+	// Update the priority selector message to show it's disabled
 	if _, err := h.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
-		Channel:    i.ChannelID,
-		ID:         i.Message.ID,
-		Content:    &newContent,
+		Channel: i.ChannelID,
+		ID:      i.Message.ID,
+		Content: &[]string{fmt.Sprintf("📊 **Priority set to %s %s**",
+			func() string {
+				switch priority {
+				case domain.PriorityLow:
+					return "🟢"
+				case domain.PriorityHigh:
+					return "🔴"
+				default:
+					return "🟡"
+				}
+			}(), strings.Title(priorityStr))}[0],
 		Components: &[]discordgo.MessageComponent{disabledSelectMenu},
 	}); err != nil {
 		h.logger.Error("Failed to update priority selector message", zap.Error(err))
 	}
 
+	// Find and update the main issue card message
+
+	h.updateIssueCard(ctx, issue.Channel.DiscordChannelID, issue)
+
 	h.respondToInteraction(ctx, i, fmt.Sprintf("✅ Priority set to **%s**", strings.Title(priorityStr)), true)
+}
+
+func (h *Handler) handleAssigneeDeveloperSelection(ctx context.Context, i *discordgo.InteractionCreate) {
+	if len(i.MessageComponentData().Values) == 0 {
+		h.respondToInteraction(ctx, i, "No assignee selected", true)
+		return
+	}
+
+	assigneeStr := i.MessageComponentData().Values[0]
+	// assignee := domain.AssigneeRole(assigneeStr)
+
+	// Extract issue ID from custom ID (format: "issue_assignee_dev_<uuid>")
+	customID := i.MessageComponentData().CustomID
+	parts := strings.Split(customID, "_")
+	if len(parts) < 3 {
+		h.logger.Error("Invalid assignee developer selector custom ID", zap.String("custom_id", customID))
+		h.respondToInteraction(ctx, i, "❌ Invalid assignee developer selector", true)
+		return
+	}
+
+	issueIDStr := parts[3]
+	issueID, err := uuid.Parse(issueIDStr)
+	if err != nil {
+		h.logger.Error("Invalid issue ID in assignee developer selector", zap.Error(err), zap.String("issue_id", issueIDStr))
+		h.respondToInteraction(ctx, i, "❌ Invalid issue ID", true)
+		return
+	}
+
+	h.logger.Info("Assigning developer to issue", zap.String("issue_id", issueID.String()), zap.String("assignee", assigneeStr))
+	// Update the issue assignee using Discord ID
+	if _, err := h.issueAssigneeService.AssignUserToIssue(ctx, issueID, assigneeStr, domain.AssigneeRoleDev); err != nil {
+		h.logger.Error("Failed to update issue assignee", zap.Error(err), zap.String("issue_id", issueID.String()), zap.String("assignee", assigneeStr))
+		h.respondToInteraction(ctx, i, "❌ Failed to update assignee. Please try again.", true)
+		return
+	}
+
+	// disable the select menu after selection
+	disabledSelectMenu := discordgo.ActionsRow{
+		Components: []discordgo.MessageComponent{
+			discordgo.SelectMenu{
+				CustomID:    fmt.Sprintf("issue_assignee_dev_%s", issueID),
+				Placeholder: "Select assignee (User or Role)",
+				MenuType:    discordgo.MentionableSelectMenu, // ✅ สำคัญ
+				MinValues:   &[]int{1}[0],
+				MaxValues:   1,
+				Disabled:    true,
+			},
+		},
+	}
+
+	// Get updated issue from service
+	issue, err := h.issueService.GetIssue(ctx, issueID)
+	if err != nil {
+		h.logger.Error("Failed to get updated issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to get updated issue", true)
+		return
+	}
+
+	// Update the assignee selector message to show it's disabled
+	if _, err := h.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    i.ChannelID,
+		ID:         i.Message.ID,
+		Content:    &[]string{fmt.Sprintf("👨‍💻 **Developer assigned: <@%s>**", assigneeStr)}[0],
+		Components: &[]discordgo.MessageComponent{disabledSelectMenu},
+	}); err != nil {
+		h.logger.Error("Failed to update assignee developer selector message", zap.Error(err))
+	}
+
+	// Get updated issue and refresh the main issue card
+	if updatedIssue, err := h.issueService.GetIssue(ctx, issueID); err == nil {
+		h.updateIssueCard(ctx, issue.Channel.DiscordChannelID, updatedIssue)
+	}
+
+	h.respondToInteraction(ctx, i, fmt.Sprintf("✅ Developer assigned: <@%s>", assigneeStr), true)
+}
+
+func (h *Handler) handleAssigneeQASelection(ctx context.Context, i *discordgo.InteractionCreate) {
+	if len(i.MessageComponentData().Values) == 0 {
+		h.respondToInteraction(ctx, i, "No assignee selected", true)
+		return
+	}
+
+	assigneeStr := i.MessageComponentData().Values[0]
+	// assignee := domain.AssigneeRole(assigneeStr)
+
+	// Extract issue ID from custom ID (format: "issue_assignee_qa_<uuid>")
+	customID := i.MessageComponentData().CustomID
+	parts := strings.Split(customID, "_")
+	if len(parts) < 3 {
+		h.logger.Error("Invalid assignee qa selector custom ID", zap.String("custom_id", customID))
+		h.respondToInteraction(ctx, i, "❌ Invalid assignee qa selector", true)
+		return
+	}
+
+	issueIDStr := parts[3]
+	issueID, err := uuid.Parse(issueIDStr)
+	if err != nil {
+		h.logger.Error("Invalid issue ID in assignee qa selector", zap.Error(err), zap.String("issue_id", issueIDStr))
+		h.respondToInteraction(ctx, i, "❌ Invalid issue ID", true)
+		return
+	}
+
+	h.logger.Info("Assigning QA to issue", zap.String("issue_id", issueID.String()), zap.String("assignee", assigneeStr))
+
+	// Update the issue assignee using Discord ID
+	if _, err := h.issueAssigneeService.AssignUserToIssue(ctx, issueID, assigneeStr, domain.AssigneeRoleQA); err != nil {
+		h.logger.Error("Failed to update issue assignee", zap.Error(err), zap.String("issue_id", issueID.String()), zap.String("assignee", assigneeStr))
+		h.respondToInteraction(ctx, i, "❌ Failed to update assignee. Please try again.", true)
+		return
+	}
+
+	// disable the select menu after selection
+	disabledSelectMenu := discordgo.ActionsRow{
+		Components: []discordgo.MessageComponent{
+			discordgo.SelectMenu{
+				CustomID:    fmt.Sprintf("issue_assignee_qa_%s", issueID),
+				Placeholder: "Select assignee (User or Role)",
+				MenuType:    discordgo.MentionableSelectMenu, // ✅ สำคัญ
+				MinValues:   &[]int{1}[0],
+				MaxValues:   1,
+				Disabled:    true,
+			},
+		},
+	}
+
+	// Get updated issue from service
+	issue, err := h.issueService.GetIssue(ctx, issueID)
+	if err != nil {
+		h.logger.Error("Failed to get updated issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to get updated issue", true)
+		return
+	}
+
+	// Update the assignee selector message to show it's disabled
+	if _, err := h.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    i.ChannelID,
+		ID:         i.Message.ID,
+		Content:    &[]string{fmt.Sprintf("🧪 **QA assigned: <@%s>**", assigneeStr)}[0],
+		Components: &[]discordgo.MessageComponent{disabledSelectMenu},
+	}); err != nil {
+		h.logger.Error("Failed to update assignee qa selector message", zap.Error(err))
+	}
+
+	// Get updated issue and refresh the main issue card
+	if updatedIssue, err := h.issueService.GetIssue(ctx, issueID); err == nil {
+		h.updateIssueCard(ctx, issue.Channel.DiscordChannelID, updatedIssue)
+	}
+
+	h.respondToInteraction(ctx, i, fmt.Sprintf("✅ QA assigned: <@%s>", assigneeStr), true)
 }
 
 // Helper methods
@@ -1007,6 +1233,213 @@ func (h *Handler) sendPrioritySelector(ctx context.Context, channelID, issueID s
 		Components: []discordgo.MessageComponent{selectMenu},
 	}); err != nil {
 		h.logger.Error("Failed to send priority selector", zap.Error(err))
+	}
+}
+
+func (h *Handler) sendAssigneeDeveloperSelector(ctx context.Context, channelID, issueID string) {
+	selectMenu := discordgo.ActionsRow{
+		Components: []discordgo.MessageComponent{
+			discordgo.SelectMenu{
+				CustomID:    fmt.Sprintf("issue_assignee_dev_%s", issueID),
+				Placeholder: "Select assignee (User or Role)",
+				MenuType:    discordgo.MentionableSelectMenu, // ✅ สำคัญ
+				MinValues:   &[]int{1}[0],
+				MaxValues:   1,
+			},
+		},
+	}
+
+	if _, err := h.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Content:    "👨‍💻 **Assign Developer:**",
+		Components: []discordgo.MessageComponent{selectMenu},
+	}); err != nil {
+		h.logger.Error("Failed to send assignee developer selector", zap.Error(err))
+	}
+}
+
+func (h *Handler) sendAssigneeQASelector(ctx context.Context, channelID, issueID string) {
+	selectMenu := discordgo.ActionsRow{
+		Components: []discordgo.MessageComponent{
+			discordgo.SelectMenu{
+				CustomID:    fmt.Sprintf("issue_assignee_qa_%s", issueID),
+				Placeholder: "Select assignee (User or Role)",
+				MenuType:    discordgo.MentionableSelectMenu, // ✅ สำคัญ
+				MinValues:   &[]int{1}[0],
+				MaxValues:   1,
+			},
+		},
+	}
+
+	if _, err := h.session.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+		Content:    "🧪 **Assign QA:**",
+		Components: []discordgo.MessageComponent{selectMenu},
+	}); err != nil {
+		h.logger.Error("Failed to send assignee qa selector", zap.Error(err))
+	}
+}
+
+// updateIssueCard finds and updates the main issue card in the channel
+func (h *Handler) updateIssueCard(ctx context.Context, channelID string, issue *domain.Issue) {
+	// Method 1: Try to use stored message ID first
+	if issue.MessageID != "" {
+		h.logger.Debug("Using stored message ID to update issue card",
+			zap.String("channel_id", channelID),
+			zap.String("issue_id", issue.ID.String()),
+			zap.String("message_id", issue.MessageID),
+		)
+
+		// Try to get the specific message
+		message, err := h.session.ChannelMessage(channelID, issue.MessageID)
+		if err == nil {
+			h.logger.Debug("Found issue card by stored message ID",
+				zap.String("message_id", issue.MessageID),
+				zap.String("issue_id", issue.ID.String()),
+			)
+
+			h.doUpdateIssueCard(message, issue, channelID)
+			return
+		} else {
+			h.logger.Warn("Failed to get message by stored ID, falling back to search",
+				zap.Error(err),
+				zap.String("message_id", issue.MessageID),
+			)
+		}
+	}
+
+	// Method 2: Search through recent messages if stored ID doesn't work
+	h.logger.Debug("Searching through recent messages for issue card",
+		zap.String("channel_id", channelID),
+		zap.String("issue_id", issue.ID.String()),
+		zap.String("public_hash", issue.PublicHash),
+	)
+
+	// Get recent messages from the channel to find the issue card
+	messages, err := h.session.ChannelMessages(channelID, 100, "", "", "")
+	if err != nil {
+		h.logger.Error("Failed to get channel messages", zap.Error(err))
+		return
+	}
+
+	h.logger.Debug("Searching for issue card to update",
+		zap.String("channel_id", channelID),
+		zap.String("issue_id", issue.ID.String()),
+		zap.String("public_hash", issue.PublicHash),
+		zap.Int("messages_count", len(messages)),
+	)
+
+	// Look for the issue card message (contains the issue ID in content or embed)
+	for _, message := range messages {
+		// Skip messages not from the bot
+		if message.Author.ID != h.session.State.User.ID {
+			continue
+		}
+
+		h.logger.Debug("Checking message for issue card",
+			zap.String("message_id", message.ID),
+			zap.String("content", message.Content),
+			zap.Int("embeds_count", len(message.Embeds)),
+		)
+
+		// Method 1: Check if message content contains issue ID (UUID format)
+		if strings.Contains(message.Content, issue.ID.String()) {
+			h.logger.Debug("Found issue card by content UUID",
+				zap.String("message_id", message.ID),
+				zap.String("issue_id", issue.ID.String()),
+			)
+			h.doUpdateIssueCard(message, issue, channelID)
+			return
+		}
+
+		// Method 2: Check if message content contains public hash
+		if issue.PublicHash != "" && strings.Contains(message.Content, issue.PublicHash) {
+			h.logger.Debug("Found issue card by content public hash",
+				zap.String("message_id", message.ID),
+				zap.String("public_hash", issue.PublicHash),
+			)
+			h.doUpdateIssueCard(message, issue, channelID)
+			return
+		}
+
+		// Method 3: Check embeds for issue identification
+		for _, embed := range message.Embeds {
+			// Check embed title for public hash
+			if embed.Title != "" && issue.PublicHash != "" && strings.Contains(embed.Title, issue.PublicHash) {
+				h.logger.Debug("Found issue card by embed title",
+					zap.String("message_id", message.ID),
+					zap.String("embed_title", embed.Title),
+					zap.String("public_hash", issue.PublicHash),
+				)
+				h.doUpdateIssueCard(message, issue, channelID)
+				return
+			}
+
+			// Check embed description for issue ID
+			if embed.Description != "" && strings.Contains(embed.Description, issue.ID.String()) {
+				h.logger.Debug("Found issue card by embed description",
+					zap.String("message_id", message.ID),
+					zap.String("issue_id", issue.ID.String()),
+				)
+				h.doUpdateIssueCard(message, issue, channelID)
+				return
+			}
+
+			// Check embed fields for issue ID
+			for _, field := range embed.Fields {
+				if strings.Contains(field.Value, issue.ID.String()) {
+					h.logger.Debug("Found issue card by embed field",
+						zap.String("message_id", message.ID),
+						zap.String("field_name", field.Name),
+						zap.String("issue_id", issue.ID.String()),
+					)
+					h.doUpdateIssueCard(message, issue, channelID)
+					return
+				}
+			}
+
+			// Check embed footer for issue ID
+			if embed.Footer != nil && embed.Footer.Text != "" && strings.Contains(embed.Footer.Text, issue.ID.String()) {
+				h.logger.Debug("Found issue card by embed footer",
+					zap.String("message_id", message.ID),
+					zap.String("footer_text", embed.Footer.Text),
+					zap.String("issue_id", issue.ID.String()),
+				)
+				h.doUpdateIssueCard(message, issue, channelID)
+				return
+			}
+		}
+	}
+
+	h.logger.Warn("Could not find issue card message to update",
+		zap.String("channel_id", channelID),
+		zap.String("issue_id", issue.ID.String()),
+		zap.String("public_hash", issue.PublicHash),
+		zap.Int("searched_messages", len(messages)),
+	)
+}
+
+// doUpdateIssueCard performs the actual update of an issue card message
+func (h *Handler) doUpdateIssueCard(message *discordgo.Message, issue *domain.Issue, channelID string) {
+	// Create updated issue card
+	embed, components := CreateIssueCard(issue)
+
+	// Update the message
+	if _, err := h.session.ChannelMessageEditComplex(&discordgo.MessageEdit{
+		Channel:    channelID,
+		ID:         message.ID,
+		Content:    &message.Content, // Keep original content
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
+		Components: &components,
+	}); err != nil {
+		h.logger.Error("Failed to update issue card",
+			zap.Error(err),
+			zap.String("message_id", message.ID),
+			zap.String("issue_id", issue.ID.String()),
+		)
+	} else {
+		h.logger.Info("Successfully updated issue card",
+			zap.String("message_id", message.ID),
+			zap.String("issue_id", issue.ID.String()),
+		)
 	}
 }
 

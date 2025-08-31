@@ -10,8 +10,8 @@ import (
 type IssueStatusLog struct {
 	ID        uuid.UUID  `json:"id" gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
 	IssueID   uuid.UUID  `json:"issue_id" gorm:"type:uuid;not null"`
-	OldStatus *Status    `json:"old_status,omitempty" gorm:"size:20"`
-	NewStatus Status     `json:"new_status" gorm:"size:20;not null"`
+	OldStatus *Status    `json:"old_status,omitempty" gorm:"size:40"`
+	NewStatus Status     `json:"new_status" gorm:"size:40;not null"`
 	ChangedBy *uuid.UUID `json:"changed_by,omitempty" gorm:"type:uuid"`
 	ChangedAt time.Time  `json:"changed_at" gorm:"type:timestamptz;default:now()"`
 
@@ -47,44 +47,33 @@ func IsStatusTransitionValid(from *Status, to Status) bool {
 	// Define valid transitions based on workflow
 	validTransitions := map[Status][]Status{
 		StatusOpen: {
-			StatusAssignedDev, // Assign to developer
-			StatusClosed,      // Close without assignment
-		},
-		StatusAssignedDev: {
-			StatusInProgress, // Developer starts working
-			StatusOpen,       // Unassign developer
-			StatusClosed,     // Close without work
+			StatusClosed, // Close without assignment
 		},
 		StatusInProgress: {
-			StatusResolved,    // Developer completes work
-			StatusAssignedDev, // Back to assigned (pause work)
-			StatusOpen,        // Unassign completely
+			StatusResolved, // Developer starts working
+			StatusOpen,     // Unassign developer
+			StatusClosed,   // Close without work
 		},
 		StatusResolved: {
-			StatusAssignedQA, // Assign to QA for testing
-			StatusClosed,     // Close without QA (direct close)
-			StatusInProgress, // Developer continues work
+			StatusVerified, // Developer completes work
+			StatusOpen,     // Back to assigned (pause work)
 		},
-		StatusAssignedQA: {
-			StatusVerified, // QA approves
+		StatusVerified: {
+			StatusClosed,   // QA approves
 			StatusRejected, // QA rejects
 			StatusResolved, // Unassign QA
 		},
-		StatusVerified: {
-			StatusClosed,   // Close after QA approval
-			StatusRejected, // Revert QA decision
-		},
 		StatusRejected: {
-			StatusAssignedDev, // Reassign to developer
-			StatusInProgress,  // Developer continues
-			StatusOpen,        // Back to open
+			StatusInProgress, // Reassign to developer
+			StatusInProgress, // Developer continues
+			StatusOpen,       // Back to open
 		},
 		StatusClosed: {
 			StatusReopened, // Reopen closed issue
 		},
 		StatusReopened: {
-			StatusOpen,        // Back to open status
-			StatusAssignedDev, // Direct assign to dev
+			StatusOpen,       // Back to open status
+			StatusInProgress, // Direct assign to dev
 		},
 	}
 
@@ -107,14 +96,10 @@ func GetStatusDisplayName(status Status) string {
 	switch status {
 	case StatusOpen:
 		return "Open"
-	case StatusAssignedDev:
-		return "Assigned to Developer"
 	case StatusInProgress:
 		return "In Progress"
 	case StatusResolved:
 		return "Resolved"
-	case StatusAssignedQA:
-		return "Assigned to QA"
 	case StatusVerified:
 		return "Verified"
 	case StatusClosed:
@@ -133,14 +118,10 @@ func GetStatusColor(status Status) string {
 	switch status {
 	case StatusOpen:
 		return "#6c757d" // Gray
-	case StatusAssignedDev:
-		return "#17a2b8" // Info blue
 	case StatusInProgress:
 		return "#ffc107" // Warning yellow
 	case StatusResolved:
 		return "#28a745" // Success green
-	case StatusAssignedQA:
-		return "#007bff" // Primary blue
 	case StatusVerified:
 		return "#20c997" // Teal
 	case StatusClosed:
@@ -167,15 +148,14 @@ func IsActiveStatus(status Status) bool {
 // GetNextPossibleStatuses returns the list of possible next statuses
 func GetNextPossibleStatuses(currentStatus Status) []Status {
 	validTransitions := map[Status][]Status{
-		StatusOpen:        {StatusAssignedDev, StatusClosed},
-		StatusAssignedDev: {StatusInProgress, StatusOpen, StatusClosed},
-		StatusInProgress:  {StatusResolved, StatusAssignedDev, StatusOpen},
-		StatusResolved:    {StatusAssignedQA, StatusClosed, StatusInProgress},
-		StatusAssignedQA:  {StatusVerified, StatusRejected, StatusResolved},
-		StatusVerified:    {StatusClosed, StatusRejected},
-		StatusRejected:    {StatusAssignedDev, StatusInProgress, StatusOpen},
-		StatusClosed:      {StatusReopened},
-		StatusReopened:    {StatusOpen, StatusAssignedDev},
+		StatusDraft:      {StatusOpen},
+		StatusOpen:       {StatusInProgress, StatusClosed},
+		StatusInProgress: {StatusResolved},
+		StatusResolved:   {StatusVerified},
+		StatusVerified:   {StatusClosed, StatusRejected},
+		StatusRejected:   {StatusInProgress, StatusOpen},
+		StatusClosed:     {StatusReopened},
+		StatusReopened:   {StatusOpen},
 	}
 
 	if transitions, exists := validTransitions[currentStatus]; exists {
@@ -189,14 +169,10 @@ func GetWorkflowStage(status Status) int {
 	switch status {
 	case StatusOpen:
 		return 1
-	case StatusAssignedDev:
-		return 2
 	case StatusInProgress:
 		return 3
 	case StatusResolved:
 		return 4
-	case StatusAssignedQA:
-		return 5
 	case StatusVerified:
 		return 6
 	case StatusClosed:

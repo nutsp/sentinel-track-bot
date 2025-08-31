@@ -63,6 +63,8 @@ func (r *issueRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Is
 		Preload("Channel.Project.Customer").
 		Preload("Reporter").
 		Preload("Assignee").
+		Preload("Assignees").
+		Preload("Assignees.User").
 		Where("id = ?", id).
 		First(&issue).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {

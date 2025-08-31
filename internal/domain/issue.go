@@ -19,15 +19,14 @@ const (
 type Status string
 
 const (
-	StatusOpen        Status = "open"         // 1. Initial status when issue is created
-	StatusAssignedDev Status = "assigned_dev" // 2. Assigned to developer
-	StatusInProgress  Status = "in_progress"  // 3. Developer is working on it
-	StatusResolved    Status = "resolved"     // 4. Developer marked as resolved
-	StatusAssignedQA  Status = "assigned_qa"  // 5. Assigned to QA for testing
-	StatusVerified    Status = "verified"     // 6. QA verified the fix
-	StatusClosed      Status = "closed"       // 7. Issue is closed
-	StatusRejected    Status = "rejected"     // QA rejected the fix (back to dev)
-	StatusReopened    Status = "reopened"     // Issue was reopened
+	StatusDraft      Status = "draft"       // 0. Draft status when issue is created
+	StatusOpen       Status = "open"        // 1. Initial status when issue is created
+	StatusInProgress Status = "in_progress" // 2. Developer is working on it
+	StatusResolved   Status = "resolved"    // 3. Developer marked as resolved
+	StatusVerified   Status = "verified"    // 4. QA verified the fix
+	StatusClosed     Status = "closed"      // 5. Issue is closed
+	StatusRejected   Status = "rejected"    // 6. QA rejected the fix (back to dev)
+	StatusReopened   Status = "reopened"    // Issue was reopened
 )
 
 // Source represents the source of an issue
@@ -49,7 +48,7 @@ type Issue struct {
 	Description      string     `json:"description" gorm:"not null;type:text"`
 	ImageURL         string     `json:"image_url,omitempty" gorm:"size:500"`
 	Priority         Priority   `json:"priority" gorm:"size:10;default:'medium'"`
-	Status           Status     `json:"status" gorm:"size:10;default:'open'"`
+	Status           Status     `json:"status" gorm:"size:40;default:'open'"`
 	Source           string     `json:"source" gorm:"size:20;default:'web'"`               // 'discord' or 'web'
 	ThreadID         string     `json:"thread_id,omitempty" gorm:"size:100"`               // Discord thread ID (optional)
 	MessageID        string     `json:"message_id,omitempty" gorm:"size:100"`              // Discord message ID (optional)
@@ -81,7 +80,7 @@ func IsValidPriority(p Priority) bool {
 
 // IsValidStatus checks if the given status is valid
 func IsValidStatus(s Status) bool {
-	return s == StatusOpen || s == StatusClosed
+	return s == StatusOpen || s == StatusClosed || s == StatusInProgress || s == StatusResolved || s == StatusVerified || s == StatusClosed || s == StatusRejected || s == StatusReopened
 }
 
 // IsValidSource checks if the given source is valid
@@ -223,12 +222,12 @@ func (i *Issue) GetNextPossibleStatuses() []Status {
 
 // IsInDevPhase checks if the issue is in development phase
 func (i *Issue) IsInDevPhase() bool {
-	return i.Status == StatusAssignedDev || i.Status == StatusInProgress || i.Status == StatusResolved
+	return i.Status == StatusInProgress || i.Status == StatusResolved
 }
 
 // IsInQAPhase checks if the issue is in QA phase
 func (i *Issue) IsInQAPhase() bool {
-	return i.Status == StatusAssignedQA || i.Status == StatusVerified || i.Status == StatusRejected
+	return i.Status == StatusVerified || i.Status == StatusRejected
 }
 
 // IsActive checks if the issue is in an active state

@@ -21,20 +21,52 @@ func NewCommandManager(session *discordgo.Session, logger *zap.Logger) *CommandM
 	}
 }
 
-// RegisterCommands registers all slash commands with Discord
-func (cm *CommandManager) RegisterCommands() error {
-	commands := []*discordgo.ApplicationCommand{
+// getCommandDefinitions returns the command definitions
+func (cm *CommandManager) getCommandDefinitions() []*discordgo.ApplicationCommand {
+	return []*discordgo.ApplicationCommand{
+		// Issue Management
 		{
 			Name:        "issue",
 			Description: "Report a new issue or bug",
 		},
 		{
 			Name:        "issues",
-			Description: "List all issues in this channel",
+			Description: "List issues in this channel with filters",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "status",
+					Description: "Filter by status",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "🔵 Open", Value: "open"},
+						{Name: "🔷 In Progress", Value: "in_progress"},
+						{Name: "🟡 In Progress", Value: "in_progress"},
+						{Name: "🟢 Resolved", Value: "resolved"},
+						{Name: "🔷 Verified", Value: "verified"},
+						{Name: "✅ Verified", Value: "verified"},
+						{Name: "🟣 Closed", Value: "closed"},
+						{Name: "🔴 Rejected", Value: "rejected"},
+						{Name: "🟠 Reopened", Value: "reopened"},
+					},
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "role",
+					Description: "Filter by assignee role",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "👨‍💻 Developer", Value: "dev"},
+						{Name: "🧪 QA Tester", Value: "qa"},
+						{Name: "👀 Reviewer", Value: "reviewer"},
+						{Name: "👤 Other", Value: "other"},
+					},
+				},
+			},
 		},
 		{
 			Name:        "issue-status",
-			Description: "Check the status of a specific issue",
+			Description: "Check the status and history of a specific issue",
 			Options: []*discordgo.ApplicationCommandOption{
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
@@ -44,6 +76,169 @@ func (cm *CommandManager) RegisterCommands() error {
 				},
 			},
 		},
+
+		// Workflow Commands - Development Phase
+		{
+			Name:        "assign-dev",
+			Description: "Assign issue to developer (Open → In Progress)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "issue_id",
+					Description: "Issue ID to assign",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "developer",
+					Description: "Developer to assign",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "start-work",
+			Description: "Start working on issue (In Progress → Resolved)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "issue_id",
+					Description: "Issue ID to start working on",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "resolve-issue",
+			Description: "Mark issue as resolved (In Progress → Resolved)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "issue_id",
+					Description: "Issue ID to resolve",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "resolution",
+					Description: "How the issue was resolved",
+					Required:    false,
+				},
+			},
+		},
+
+		// Workflow Commands - QA Phase
+		{
+			Name:        "assign-qa",
+			Description: "Assign issue to QA tester (Resolved → Verified)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "issue_id",
+					Description: "Issue ID to assign for testing",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionUser,
+					Name:        "qa_tester",
+					Description: "QA tester to assign",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "verify-issue",
+			Description: "Verify issue fix (Verified → Closed)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "issue_id",
+					Description: "Issue ID to verify",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "notes",
+					Description: "QA verification notes",
+					Required:    false,
+				},
+			},
+		},
+		{
+			Name:        "reject-issue",
+			Description: "Reject issue fix (Verified → Rejected)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "issue_id",
+					Description: "Issue ID to reject",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reason",
+					Description: "Reason for rejection",
+					Required:    true,
+				},
+			},
+		},
+
+		// Final Actions
+		{
+			Name:        "close-issue",
+			Description: "Close issue (Verified → Closed)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "issue_id",
+					Description: "Issue ID to close",
+					Required:    true,
+				},
+			},
+		},
+		{
+			Name:        "reopen-issue",
+			Description: "Reopen closed issue (Closed → Reopened)",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "issue_id",
+					Description: "Issue ID to reopen",
+					Required:    true,
+				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "reason",
+					Description: "Reason for reopening",
+					Required:    false,
+				},
+			},
+		},
+
+		// Utility Commands
+		{
+			Name:        "my-issues",
+			Description: "Show issues assigned to you",
+			Options: []*discordgo.ApplicationCommandOption{
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "role",
+					Description: "Filter by your role",
+					Required:    false,
+					Choices: []*discordgo.ApplicationCommandOptionChoice{
+						{Name: "👨‍💻 Developer", Value: "dev"},
+						{Name: "🧪 QA Tester", Value: "qa"},
+						{Name: "👀 Reviewer", Value: "reviewer"},
+					},
+				},
+			},
+		},
+		{
+			Name:        "workflow",
+			Description: "Show the issue workflow and your current tasks",
+		},
+
+		// Setup Commands
 		{
 			Name:        "register",
 			Description: "Register this channel for issue tracking with customer and project information",
@@ -53,6 +248,11 @@ func (cm *CommandManager) RegisterCommands() error {
 			Description: "Show help information for the bot",
 		},
 	}
+}
+
+// RegisterCommands registers all slash commands with Discord
+func (cm *CommandManager) RegisterCommands() error {
+	commands := cm.getCommandDefinitions()
 
 	cm.logger.Info("Registering Discord commands")
 
@@ -76,36 +276,8 @@ func (cm *CommandManager) RegisterCommands() error {
 
 // RegisterGuildCommands registers commands for a specific guild (server)
 func (cm *CommandManager) RegisterGuildCommands(guildID string) error {
-	commands := []*discordgo.ApplicationCommand{
-		{
-			Name:        "issue",
-			Description: "Report a new issue or bug",
-		},
-		{
-			Name:        "issues",
-			Description: "List all issues in this channel",
-		},
-		{
-			Name:        "issue-status",
-			Description: "Check the status of a specific issue",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "id",
-					Description: "Issue ID to check",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "register",
-			Description: "Register this channel for issue tracking with customer and project information",
-		},
-		{
-			Name:        "help",
-			Description: "Show help information for the bot",
-		},
-	}
+	// Use the same commands as global registration
+	commands := cm.getCommandDefinitions()
 
 	cm.logger.Info("Registering Discord commands for guild", zap.String("guild_id", guildID))
 
