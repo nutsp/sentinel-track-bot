@@ -1,0 +1,28 @@
+app:
+  name: "fix-track-bot"
+  version: "1.0.0"
+  environment: "development"
+  debug: true
+
+discord:
+  token: "your_discord_bot_token_here"
+  prefix: "!"
+
+database:
+  driver: "postgres"
+  host: "localhost"
+  port: 5432
+  username: "fix_track_user"
+  password: "fix_track_password"
+  database: "fix_track"
+  ssl_mode: "disable"
+  
+  # For SQLite (uncomment if using SQLite instead of PostgreSQL)
+  # driver: "sqlite"
+  # file_path: "./data/fix-track.db"
+
+logger:
+  level: "info"
+  environment: "development"
+  output_paths:
+    - "stdout"
