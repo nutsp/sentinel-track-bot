@@ -10,10 +10,18 @@ import (
 // CreateIssueCard creates a Discord embed with action buttons for an issue
 func CreateIssueCard(issue *domain.Issue) (*discordgo.MessageEmbed, []discordgo.MessageComponent) {
 
+	description := issue.Description
+	if issue.ResolutionCause != "" {
+		description += fmt.Sprintf("\n\n**Cause:** %s", issue.ResolutionCause)
+	}
+	if issue.ResolutionAction != "" {
+		description += fmt.Sprintf("\n\n**Action:** %s", issue.ResolutionAction)
+	}
+
 	// Create embed
 	embed := &discordgo.MessageEmbed{
 		Title:       fmt.Sprintf("🐛 %s", issue.Title),
-		Description: issue.Description,
+		Description: description,
 		Color:       getStatusColorInt(issue.Status),
 		Fields: []*discordgo.MessageEmbedField{
 			{
@@ -31,9 +39,6 @@ func CreateIssueCard(issue *domain.Issue) (*discordgo.MessageEmbed, []discordgo.
 				Value:  fmt.Sprintf("<@%s>", issue.Reporter.DiscordID),
 				Inline: true,
 			},
-		},
-		Footer: &discordgo.MessageEmbedFooter{
-			Text: fmt.Sprintf("Issue ID: %s", issue.ID.String()),
 		},
 		Timestamp: issue.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	}
@@ -115,7 +120,7 @@ func createStatusButton(issueID string, status domain.Status) discordgo.MessageC
 	switch status {
 	case domain.StatusDraft:
 		return &discordgo.Button{
-			Label:    "🔵 Open",
+			Label:    "Open",
 			Style:    discordgo.PrimaryButton,
 			CustomID: fmt.Sprintf("open_issue_%s", issueID),
 			Emoji: &discordgo.ComponentEmoji{
@@ -124,7 +129,7 @@ func createStatusButton(issueID string, status domain.Status) discordgo.MessageC
 		}
 	case domain.StatusOpen:
 		return &discordgo.Button{
-			Label:    "🔵 Open",
+			Label:    "Open",
 			Style:    discordgo.PrimaryButton,
 			CustomID: fmt.Sprintf("open_issue_%s", issueID),
 			Emoji: &discordgo.ComponentEmoji{
@@ -133,7 +138,7 @@ func createStatusButton(issueID string, status domain.Status) discordgo.MessageC
 		}
 	case domain.StatusInProgress:
 		return &discordgo.Button{
-			Label:    "🟡 Start Work",
+			Label:    "Start Work",
 			Style:    discordgo.PrimaryButton,
 			CustomID: fmt.Sprintf("start_work_%s", issueID),
 			Emoji: &discordgo.ComponentEmoji{
@@ -142,34 +147,25 @@ func createStatusButton(issueID string, status domain.Status) discordgo.MessageC
 		}
 	case domain.StatusResolved:
 		return &discordgo.Button{
-			Label:    "🟢 Resolve",
+			Label:    "Resolve",
 			Style:    discordgo.SuccessButton,
 			CustomID: fmt.Sprintf("resolve_issue_%s", issueID),
 			Emoji: &discordgo.ComponentEmoji{
 				Name: "🟢",
 			},
 		}
-	// case domain.StatusAssignedQA:
-	// 	return &discordgo.Button{
-	// 		Label:    "🔷 Assign QA",
-	// 		Style:    discordgo.PrimaryButton,
-	// 		CustomID: fmt.Sprintf("assign_qa_%s", issueID),
-	// 		Emoji: &discordgo.ComponentEmoji{
-	// 			Name: "🔷",
-	// 		},
-	// 	}
-	// case domain.StatusVerified:
-	// 	return &discordgo.Button{
-	// 		Label:    "✅ Verify",
-	// 		Style:    discordgo.SuccessButton,
-	// 		CustomID: fmt.Sprintf("verify_issue_%s", issueID),
-	// 		Emoji: &discordgo.ComponentEmoji{
-	// 			Name: "✅",
-	// 		},
-	// 	}
+	case domain.StatusVerified:
+		return &discordgo.Button{
+			Label:    "Verify",
+			Style:    discordgo.SuccessButton,
+			CustomID: fmt.Sprintf("verify_issue_%s", issueID),
+			Emoji: &discordgo.ComponentEmoji{
+				Name: "✅",
+			},
+		}
 	case domain.StatusClosed:
 		return &discordgo.Button{
-			Label:    "🟣 Close",
+			Label:    "Close",
 			Style:    discordgo.SecondaryButton,
 			CustomID: fmt.Sprintf("close_issue_%s", issueID),
 			Emoji: &discordgo.ComponentEmoji{
@@ -231,7 +227,7 @@ func CreateRoleSelectMenu(customID string) discordgo.MessageComponent {
 				Placeholder: "Choose role...",
 				Options: []discordgo.SelectMenuOption{
 					{
-						Label:       "👨‍💻 Developer",
+						Label:       "Developer",
 						Value:       "dev",
 						Description: "Software developer",
 						Emoji: &discordgo.ComponentEmoji{
@@ -239,7 +235,7 @@ func CreateRoleSelectMenu(customID string) discordgo.MessageComponent {
 						},
 					},
 					{
-						Label:       "🧪 QA Tester",
+						Label:       "QA Tester",
 						Value:       "qa",
 						Description: "Quality assurance tester",
 						Emoji: &discordgo.ComponentEmoji{
@@ -247,7 +243,7 @@ func CreateRoleSelectMenu(customID string) discordgo.MessageComponent {
 						},
 					},
 					{
-						Label:       "👀 Reviewer",
+						Label:       "Reviewer",
 						Value:       "reviewer",
 						Description: "Code reviewer",
 						Emoji: &discordgo.ComponentEmoji{
@@ -255,7 +251,7 @@ func CreateRoleSelectMenu(customID string) discordgo.MessageComponent {
 						},
 					},
 					{
-						Label:       "👤 Other",
+						Label:       "Other",
 						Value:       "other",
 						Description: "Other role",
 						Emoji: &discordgo.ComponentEmoji{
@@ -277,47 +273,47 @@ func CreateStatusFilterMenu(customID string) discordgo.MessageComponent {
 				Placeholder: "Filter by status...",
 				Options: []discordgo.SelectMenuOption{
 					{
-						Label: "🔵 Open",
+						Label: "Open",
 						Value: "open",
 						Emoji: &discordgo.ComponentEmoji{Name: "🔵"},
 					},
 					{
-						Label: "🔷 In Progress",
+						Label: "In Progress",
 						Value: "in_progress",
 						Emoji: &discordgo.ComponentEmoji{Name: "🔷"},
 					},
 					{
-						Label: "🟡 In Progress",
+						Label: "In Progress",
 						Value: "in_progress",
 						Emoji: &discordgo.ComponentEmoji{Name: "🟡"},
 					},
 					{
-						Label: "🟢 Resolved",
+						Label: "Resolved",
 						Value: "resolved",
 						Emoji: &discordgo.ComponentEmoji{Name: "🟢"},
 					},
 					{
-						Label: "🔷 Verified",
+						Label: "Verified",
 						Value: "verified",
 						Emoji: &discordgo.ComponentEmoji{Name: "🔷"},
 					},
 					{
-						Label: "✅ Verified",
+						Label: "Verified",
 						Value: "verified",
 						Emoji: &discordgo.ComponentEmoji{Name: "✅"},
 					},
 					{
-						Label: "🟣 Closed",
+						Label: "Closed",
 						Value: "closed",
 						Emoji: &discordgo.ComponentEmoji{Name: "🟣"},
 					},
 					{
-						Label: "🔴 Rejected",
+						Label: "Rejected",
 						Value: "rejected",
 						Emoji: &discordgo.ComponentEmoji{Name: "🔴"},
 					},
 					{
-						Label: "🟠 Reopened",
+						Label: "Reopened",
 						Value: "reopened",
 						Emoji: &discordgo.ComponentEmoji{Name: "🟠"},
 					},
@@ -404,25 +400,22 @@ func getRoleEmoji(role domain.AssigneeRole) string {
 		return "👤"
 	}
 }
-
 func getStatusColorInt(status domain.Status) int {
 	switch status {
-	case domain.StatusDraft:
-		return 0x95a5a6 // Silver gray
-	case domain.StatusOpen:
-		return 0x3498db // Bright blue
+	case domain.StatusDraft, domain.StatusOpen:
+		return 0x95a5a6 // Gray (neutral)
 	case domain.StatusInProgress:
-		return 0x9b59b6 // Amethyst purple
+		return 0xf39c12 // Orange (working)
 	case domain.StatusResolved:
-		return 0xf39c12 // Vivid orange
+		return 0x2ecc71 // Green (done)
 	case domain.StatusVerified:
-		return 0x2ecc71 // Emerald green
+		return 0x1abc9c // Teal (verified/QA passed)
 	case domain.StatusClosed:
-		return 0x34495e // Navy gray
+		return 0x9b59b6 // Purple (archived/closed)
 	case domain.StatusRejected:
-		return 0xe74c3c // Strong red
+		return 0xe74c3c // Red (rejected)
 	case domain.StatusReopened:
-		return 0xe67e22 // Carrot orange
+		return 0xe67e22 // Carrot orange (reopened)
 	default:
 		return 0x7f8c8d // Default gray
 	}

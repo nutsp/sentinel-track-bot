@@ -99,6 +99,8 @@ func (h *Handler) handleSlashCommand(ctx context.Context, i *discordgo.Interacti
 		h.handleIssuesCommand(ctx, i)
 	case "issue-status":
 		h.handleIssueStatusCommand(ctx, i)
+	case "init":
+		h.handleInitCommand(ctx, i)
 	case "register":
 		h.handleRegisterCommand(ctx, i)
 	case "help":
@@ -417,9 +419,9 @@ Need more help? Contact your server administrators.`
 	h.respondToInteraction(ctx, i, helpContent, false)
 }
 
-// handleRegisterCommand handles the /register slash command
-func (h *Handler) handleRegisterCommand(ctx context.Context, i *discordgo.InteractionCreate) {
-	h.logger.Info("Handling register command",
+// handleInitCommand handles the /init slash command
+func (h *Handler) handleInitCommand(ctx context.Context, i *discordgo.InteractionCreate) {
+	h.logger.Info("Handling init command",
 		zap.String("user_id", i.Member.User.ID),
 		zap.String("channel_id", i.ChannelID),
 		zap.String("guild_id", i.GuildID),
@@ -469,7 +471,7 @@ func (h *Handler) handleRegisterCommand(ctx context.Context, i *discordgo.Intera
 	modal := &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseModal,
 		Data: &discordgo.InteractionResponseData{
-			CustomID: "register_modal",
+			CustomID: "init_modal",
 			Title:    "Register Channel for Issue Tracking",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{
@@ -541,6 +543,77 @@ func (h *Handler) handleRegisterCommand(ctx context.Context, i *discordgo.Intera
 	}
 }
 
+// handleRegisterCommand handles the /register slash command
+func (h *Handler) handleRegisterCommand(ctx context.Context, i *discordgo.InteractionCreate) {
+	h.logger.Info("Handling register command",
+		zap.String("user_id", i.Member.User.ID),
+		zap.String("channel_id", i.ChannelID),
+	)
+
+	// TODO: Implement register user
+	modal := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: "register_modal",
+			Title:    "Register New User In This Channel",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "user_name",
+							Label:       "Your Full Name (Optional)",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "e.g. John Doe",
+							Required:    false,
+							MaxLength:   255,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "user_email",
+							Label:       "Your Email (Optional)",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "e.g. john.doe@example.com",
+							Required:    false,
+							MaxLength:   255,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "user_role",
+							Label:       "Your Role (Optional)",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "e.g. customer or support",
+							Required:    false,
+							MaxLength:   255,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "customer_name",
+							Label:       "Customer/Organization Name",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "e.g. Acme Corporation",
+							Required:    false,
+							MaxLength:   255,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := h.session.InteractionRespond(i.Interaction, modal); err != nil {
+		h.logger.Error("Failed to respond with register modal", zap.Error(err))
+	}
+}
+
 // handleModalSubmit handles modal submission interactions
 func (h *Handler) handleModalSubmit(ctx context.Context, i *discordgo.InteractionCreate) {
 	modalID := i.ModalSubmitData().CustomID
@@ -551,11 +624,13 @@ func (h *Handler) handleModalSubmit(ctx context.Context, i *discordgo.Interactio
 		zap.String("channel_id", i.ChannelID),
 	)
 
-	switch modalID {
-	case "issue_modal":
+	switch {
+	case modalID == "issue_modal":
 		h.handleIssueModalSubmit(ctx, i)
-	case "register_modal":
-		h.handleRegisterModalSubmit(ctx, i)
+	case strings.HasPrefix(modalID, "resolve_modal_"):
+		h.handleResolveModelSubmit(ctx, i)
+	case modalID == "init_modal":
+		h.handleRegisterChannelModalSubmit(ctx, i)
 	default:
 		h.logger.Warn("Unknown modal ID", zap.String("modal_id", modalID))
 		h.respondToInteraction(ctx, i, "Unknown modal", true)
@@ -563,7 +638,7 @@ func (h *Handler) handleModalSubmit(ctx context.Context, i *discordgo.Interactio
 }
 
 // handleRegisterModalSubmit handles the channel registration modal submission
-func (h *Handler) handleRegisterModalSubmit(ctx context.Context, i *discordgo.InteractionCreate) {
+func (h *Handler) handleRegisterChannelModalSubmit(ctx context.Context, i *discordgo.InteractionCreate) {
 	// Extract modal data
 	components := i.ModalSubmitData().Components
 	if len(components) < 3 {
@@ -704,6 +779,15 @@ func (h *Handler) handleIssueModalSubmit(ctx context.Context, i *discordgo.Inter
 		return
 	}
 
+	issue, err = h.issueService.GetIssue(ctx, issue.ID)
+	if err != nil {
+		h.logger.Error("Failed to get issue", zap.Error(err))
+		h.editInteractionResponse(ctx, i, "❌ Failed to get issue. Please try again.")
+		return
+	}
+
+	shortIssueID := fmt.Sprintf("%s-%s", issue.Project.Name, issue.ID.String()[:8])
+
 	// Create issue card with action buttons
 	embed, components := CreateIssueCard(issue)
 
@@ -714,7 +798,7 @@ func (h *Handler) handleIssueModalSubmit(ctx context.Context, i *discordgo.Inter
 
 	// Create message with issue card
 	message, err := h.session.ChannelMessageSendComplex(i.ChannelID, &discordgo.MessageSend{
-		Content:    fmt.Sprintf("🎫 **#%s**\n<@%s> reported a new issue:", issue.ID.String(), i.Member.User.ID),
+		Content:    fmt.Sprintf("🎫 **#%s**", shortIssueID),
 		Embeds:     []*discordgo.MessageEmbed{embed},
 		Components: components,
 	})
@@ -730,7 +814,68 @@ func (h *Handler) handleIssueModalSubmit(ctx context.Context, i *discordgo.Inter
 	}
 
 	// Update the original response
-	h.editInteractionResponse(ctx, i, fmt.Sprintf("✅ Issue **%s** created successfully!", issue.PublicHash))
+	h.editInteractionResponse(ctx, i, fmt.Sprintf("✅ Issue **%s** created successfully!", shortIssueID))
+}
+
+// handleResolveModelSubmit handles the resolve issue modal submission
+func (h *Handler) handleResolveModelSubmit(ctx context.Context, i *discordgo.InteractionCreate) {
+	// Extract modal data
+	components := i.ModalSubmitData().Components
+	if len(components) < 2 {
+		h.logger.Error("Invalid modal components")
+		h.respondToInteraction(ctx, i, "Invalid form data", true)
+		return
+	}
+
+	cause := components[0].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+	action := components[1].(*discordgo.ActionsRow).Components[0].(*discordgo.TextInput).Value
+
+	h.logger.Info("Resolving issue from modal",
+		zap.String("cause", cause),
+		zap.String("action", action),
+		zap.String("user_id", i.Member.User.ID),
+		zap.String("channel_id", i.ChannelID),
+		zap.String("issue_id", i.ModalSubmitData().CustomID),
+	)
+
+	// Respond to user
+	h.respondToInteraction(ctx, i, "Resolving issue...", true)
+
+	parts := strings.Split(i.ModalSubmitData().CustomID, "_")
+	if len(parts) < 3 {
+		h.logger.Error("Invalid resolve issue button custom ID")
+		h.respondToInteraction(ctx, i, "Invalid button action", true)
+		return
+	}
+
+	issueIDStr := parts[2]
+	issueID, err := uuid.Parse(issueIDStr)
+	if err != nil {
+		h.logger.Error("Invalid issue ID in button", zap.Error(err))
+		h.respondToInteraction(ctx, i, "Invalid issue ID", true)
+		return
+	}
+
+	// Get issue from service
+	issue, err := h.issueService.GetIssue(ctx, issueID)
+	if err != nil {
+		h.logger.Error("Failed to get issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to get issue", true)
+		return
+	}
+
+	// Resolve the issue through service
+	if err := h.issueService.UpdateIssueResolved(ctx, issueID, cause, action); err != nil {
+		h.logger.Error("Failed to resolve issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to resolve issue", true)
+		return
+	}
+
+	// Get updated issue and refresh the main issue card
+	if updatedIssue, err := h.issueService.GetIssue(ctx, issueID); err == nil {
+		h.updateIssueCard(ctx, issue.Channel.DiscordChannelID, updatedIssue)
+	}
+
 }
 
 // handleMessageComponent handles button clicks and select menu interactions
@@ -748,12 +893,10 @@ func (h *Handler) handleMessageComponent(ctx context.Context, i *discordgo.Inter
 		h.handleOpenIssueButton(ctx, i)
 	case strings.HasPrefix(customID, "start_work_"):
 		h.handleStartWorkButton(ctx, i)
-	// case strings.HasPrefix(customID, "resolve_issue_"):
-	// 	h.handleResolveIssueButton(ctx, i)
-	// case strings.HasPrefix(customID, "assign_qa_"):
-	// 	h.handleAssignQAButton(ctx, i)
-	// case strings.HasPrefix(customID, "verify_issue_"):
-	// 	h.handleVerifyIssueButton(ctx, i)
+	case strings.HasPrefix(customID, "resolve_issue_"):
+		h.handleResolveIssueButton(ctx, i)
+	case strings.HasPrefix(customID, "verify_issue_"):
+		h.handleVerifyIssueButton(ctx, i)
 	// case strings.HasPrefix(customID, "reject_issue_"):
 	// 	h.handleRejectIssueButton(ctx, i)
 	case strings.HasPrefix(customID, "close_issue_"):
@@ -820,7 +963,7 @@ func (h *Handler) handleOpenIssueButton(ctx context.Context, i *discordgo.Intera
 	}
 
 	// Create thread for discussion
-	thread, err := h.session.MessageThreadStart(i.ChannelID, issue.MessageID, fmt.Sprintf("Issue: %s", issue.Title), 60)
+	thread, err := h.session.MessageThreadStart(i.ChannelID, issue.MessageID, fmt.Sprintf("%s-%s", issue.Project.Name, issue.ID.String()[:8]), 0)
 	if err != nil {
 		h.logger.Error("Failed to create thread", zap.Error(err))
 		// Continue without thread
@@ -836,7 +979,7 @@ func (h *Handler) handleOpenIssueButton(ctx context.Context, i *discordgo.Intera
 		h.sendAssigneeQASelector(ctx, thread.ID, issue.ID.String())
 
 		// Send welcome message in thread
-		h.sendMessage(ctx, thread.ID, fmt.Sprintf("💬 Discussion thread for Issue **%s**\n\nFeel free to add comments, updates, or additional information here.", issue.PublicHash))
+		h.sendMessage(ctx, thread.ID, fmt.Sprintf("💬 Discussion thread for Issue **%s**\n\nFeel free to add comments, updates, or additional information here.", fmt.Sprintf("%s-%s", issue.Project.Name, issue.ID.String()[:8])))
 	}
 }
 
@@ -881,6 +1024,97 @@ func (h *Handler) handleStartWorkButton(ctx context.Context, i *discordgo.Intera
 	}
 }
 
+// handleResolveIssueButton handles the resolve issue button click
+func (h *Handler) handleResolveIssueButton(ctx context.Context, i *discordgo.InteractionCreate) {
+	parts := strings.Split(i.MessageComponentData().CustomID, "_")
+	if len(parts) < 3 {
+		h.logger.Error("Invalid resolve issue button custom ID")
+		h.respondToInteraction(ctx, i, "Invalid button action", true)
+		return
+	}
+
+	issueIDStr := parts[2]
+
+	modal := &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseModal,
+		Data: &discordgo.InteractionResponseData{
+			CustomID: "resolve_modal_" + issueIDStr,
+			Title:    "Resolve Issue",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "cause",
+							Label:       "Cause",
+							Style:       discordgo.TextInputShort,
+							Placeholder: "e.g. Bug found",
+							Required:    true,
+							MaxLength:   2000,
+						},
+					},
+				},
+				discordgo.ActionsRow{
+					Components: []discordgo.MessageComponent{
+						discordgo.TextInput{
+							CustomID:    "action",
+							Label:       "Action",
+							Style:       discordgo.TextInputParagraph,
+							Placeholder: "Describe the action to resolve the issue...",
+							Required:    true,
+							MaxLength:   2000,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := h.session.InteractionRespond(i.Interaction, modal); err != nil {
+		h.logger.Error("Failed to respond with modal", zap.Error(err))
+	}
+}
+
+// handleVerifyIssueButton handles the verify issue button click
+func (h *Handler) handleVerifyIssueButton(ctx context.Context, i *discordgo.InteractionCreate) {
+	parts := strings.Split(i.MessageComponentData().CustomID, "_")
+	if len(parts) < 3 {
+		h.logger.Error("Invalid verify issue button custom ID")
+		h.respondToInteraction(ctx, i, "Invalid button action", true)
+		return
+	}
+
+	issueIDStr := parts[2]
+	issueID, err := uuid.Parse(issueIDStr)
+	if err != nil {
+		h.logger.Error("Invalid issue ID in button", zap.Error(err))
+		h.respondToInteraction(ctx, i, "Invalid issue ID", true)
+		return
+	}
+
+	// Get issue from service
+	issue, err := h.issueService.GetIssue(ctx, issueID)
+	if err != nil {
+		h.logger.Error("Failed to get issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to get issue", true)
+		return
+	}
+
+	// Verify the issue through service
+	if err := h.issueService.VerifiedIssue(ctx, issueID); err != nil {
+		h.logger.Error("Failed to verify issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to verify issue", true)
+		return
+	}
+
+	// Respond to user
+	h.respondToInteraction(ctx, i, "Verifying issue...", true)
+
+	// Get updated issue and refresh the main issue card
+	if updatedIssue, err := h.issueService.GetIssue(ctx, issueID); err == nil {
+		h.updateIssueCard(ctx, issue.Channel.DiscordChannelID, updatedIssue)
+	}
+}
+
 // handleCloseIssueButton handles the close issue button click
 func (h *Handler) handleCloseIssueButton(ctx context.Context, i *discordgo.InteractionCreate) {
 	parts := strings.Split(i.MessageComponentData().CustomID, "_")
@@ -905,6 +1139,16 @@ func (h *Handler) handleCloseIssueButton(ctx context.Context, i *discordgo.Inter
 		return
 	}
 
+	// Get updated issue and refresh the main issue card
+	issue, err := h.issueService.GetIssue(ctx, issueID)
+	if err != nil {
+		h.logger.Error("Failed to get issue", zap.Error(err))
+		h.respondToInteraction(ctx, i, "❌ Failed to get issue", true)
+		return
+	}
+
+	embed, _ := CreateIssueCard(issue)
+
 	// Respond to user
 	h.respondToInteraction(ctx, i, "🔒 Closing issue...", true)
 
@@ -916,7 +1160,7 @@ func (h *Handler) handleCloseIssueButton(ctx context.Context, i *discordgo.Inter
 		Channel:    i.ChannelID,
 		ID:         originalMessage.ID,
 		Content:    &closedContent,
-		Embeds:     &originalMessage.Embeds,
+		Embeds:     &[]*discordgo.MessageEmbed{embed},
 		Components: &[]discordgo.MessageComponent{}, // Remove all components
 	}); err != nil {
 		h.logger.Error("Failed to update message", zap.Error(err))
@@ -977,22 +1221,6 @@ func (h *Handler) handlePrioritySelection(ctx context.Context, i *discordgo.Inte
 		return
 	}
 
-	// Disable the select menu after selection
-	disabledSelectMenu := discordgo.ActionsRow{
-		Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{
-				CustomID:    customID,
-				Placeholder: fmt.Sprintf("Priority set to %s", strings.Title(priorityStr)),
-				Disabled:    true,
-				Options: []discordgo.SelectMenuOption{
-					{Label: "Low", Value: "low", Emoji: &discordgo.ComponentEmoji{Name: "🟢"}},
-					{Label: "Medium", Value: "medium", Emoji: &discordgo.ComponentEmoji{Name: "🟡"}},
-					{Label: "High", Value: "high", Emoji: &discordgo.ComponentEmoji{Name: "🔴"}},
-				},
-			},
-		},
-	}
-
 	// Get updated issue from service
 	issue, err := h.issueService.GetIssue(ctx, issueID)
 	if err != nil {
@@ -1016,7 +1244,7 @@ func (h *Handler) handlePrioritySelection(ctx context.Context, i *discordgo.Inte
 					return "🟡"
 				}
 			}(), strings.Title(priorityStr))}[0],
-		Components: &[]discordgo.MessageComponent{disabledSelectMenu},
+		Components: &[]discordgo.MessageComponent{}, // clear all components
 	}); err != nil {
 		h.logger.Error("Failed to update priority selector message", zap.Error(err))
 	}
@@ -1062,20 +1290,6 @@ func (h *Handler) handleAssigneeDeveloperSelection(ctx context.Context, i *disco
 		return
 	}
 
-	// disable the select menu after selection
-	disabledSelectMenu := discordgo.ActionsRow{
-		Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{
-				CustomID:    fmt.Sprintf("issue_assignee_dev_%s", issueID),
-				Placeholder: "Select assignee (User or Role)",
-				MenuType:    discordgo.MentionableSelectMenu, // ✅ สำคัญ
-				MinValues:   &[]int{1}[0],
-				MaxValues:   1,
-				Disabled:    true,
-			},
-		},
-	}
-
 	// Get updated issue from service
 	issue, err := h.issueService.GetIssue(ctx, issueID)
 	if err != nil {
@@ -1089,7 +1303,7 @@ func (h *Handler) handleAssigneeDeveloperSelection(ctx context.Context, i *disco
 		Channel:    i.ChannelID,
 		ID:         i.Message.ID,
 		Content:    &[]string{fmt.Sprintf("👨‍💻 **Developer assigned: <@%s>**", assigneeStr)}[0],
-		Components: &[]discordgo.MessageComponent{disabledSelectMenu},
+		Components: &[]discordgo.MessageComponent{},
 	}); err != nil {
 		h.logger.Error("Failed to update assignee developer selector message", zap.Error(err))
 	}
@@ -1137,20 +1351,6 @@ func (h *Handler) handleAssigneeQASelection(ctx context.Context, i *discordgo.In
 		return
 	}
 
-	// disable the select menu after selection
-	disabledSelectMenu := discordgo.ActionsRow{
-		Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{
-				CustomID:    fmt.Sprintf("issue_assignee_qa_%s", issueID),
-				Placeholder: "Select assignee (User or Role)",
-				MenuType:    discordgo.MentionableSelectMenu, // ✅ สำคัญ
-				MinValues:   &[]int{1}[0],
-				MaxValues:   1,
-				Disabled:    true,
-			},
-		},
-	}
-
 	// Get updated issue from service
 	issue, err := h.issueService.GetIssue(ctx, issueID)
 	if err != nil {
@@ -1164,7 +1364,7 @@ func (h *Handler) handleAssigneeQASelection(ctx context.Context, i *discordgo.In
 		Channel:    i.ChannelID,
 		ID:         i.Message.ID,
 		Content:    &[]string{fmt.Sprintf("🧪 **QA assigned: <@%s>**", assigneeStr)}[0],
-		Components: &[]discordgo.MessageComponent{disabledSelectMenu},
+		Components: &[]discordgo.MessageComponent{},
 	}); err != nil {
 		h.logger.Error("Failed to update assignee qa selector message", zap.Error(err))
 	}

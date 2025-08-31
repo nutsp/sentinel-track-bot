@@ -352,6 +352,11 @@ func (s *issueService) InProgressIssue(ctx context.Context, id uuid.UUID) error 
 	return s.UpdateIssueStatus(ctx, id, domain.StatusInProgress)
 }
 
+// VerifiedIssue verifies an issue
+func (s *issueService) VerifiedIssue(ctx context.Context, id uuid.UUID) error {
+	return s.UpdateIssueStatus(ctx, id, domain.StatusVerified)
+}
+
 // CloseIssue closes an issue
 func (s *issueService) CloseIssue(ctx context.Context, id uuid.UUID) error {
 	return s.UpdateIssueStatus(ctx, id, domain.StatusClosed)
@@ -409,6 +414,47 @@ func (s *issueService) UpdateIssueMessageID(ctx context.Context, id uuid.UUID, m
 	s.logger.Info("Issue message ID updated successfully",
 		zap.String("issue_id", id.String()),
 		zap.String("message_id", messageID),
+	)
+
+	return nil
+}
+
+// UpdateIssueResolved updates the resolved information for an issue
+func (s *issueService) UpdateIssueResolved(ctx context.Context, id uuid.UUID, cause, action string) error {
+	s.logger.Debug("Updating issue resolved",
+		zap.String("issue_id", id.String()),
+		zap.String("cause", cause),
+		zap.String("action", action),
+	)
+
+	issue, err := s.issueRepo.GetByID(ctx, id)
+	if err != nil {
+		s.logger.Error("Failed to get issue for resolved update",
+			zap.Error(err),
+			zap.String("issue_id", id.String()),
+		)
+		return fmt.Errorf("failed to get issue for resolved update: %w", err)
+	}
+
+	// Update resolved information
+	issue.Status = domain.StatusResolved
+	issue.ResolutionCause = cause
+	issue.ResolutionAction = action
+
+	if err := s.issueRepo.Update(ctx, issue); err != nil {
+		s.logger.Error("Failed to update issue resolved",
+			zap.Error(err),
+			zap.String("issue_id", id.String()),
+			zap.String("cause", cause),
+			zap.String("action", action),
+		)
+		return fmt.Errorf("failed to update issue resolved: %w", err)
+	}
+
+	s.logger.Info("Issue resolved updated successfully",
+		zap.String("issue_id", id.String()),
+		zap.String("cause", cause),
+		zap.String("action", action),
 	)
 
 	return nil

@@ -53,8 +53,8 @@ type Issue struct {
 	ThreadID         string     `json:"thread_id,omitempty" gorm:"size:100"`               // Discord thread ID (optional)
 	MessageID        string     `json:"message_id,omitempty" gorm:"size:100"`              // Discord message ID (optional)
 	PublicHash       string     `json:"public_hash,omitempty" gorm:"size:100;uniqueIndex"` // For public links
-	ResolutionCause  string     `json:"resolution_cause,omitempty" gorm:"size:255"`        // For resolution cause
-	ResolutionAction string     `json:"resolution_action,omitempty" gorm:"size:255"`       // For resolution action
+	ResolutionCause  string     `json:"resolution_cause,omitempty" gorm:"type:text"`       // For resolution cause
+	ResolutionAction string     `json:"resolution_action,omitempty" gorm:"type:text"`      // For resolution action
 	CreatedAt        time.Time  `json:"created_at" gorm:"type:timestamptz;default:now()"`
 	UpdatedAt        time.Time  `json:"updated_at" gorm:"type:timestamptz;default:now()"`
 	ClosedAt         *time.Time `json:"closed_at,omitempty" gorm:"type:timestamptz"`

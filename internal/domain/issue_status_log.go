@@ -116,22 +116,22 @@ func GetStatusDisplayName(status Status) string {
 // GetStatusColor returns a color code for UI display
 func GetStatusColor(status Status) string {
 	switch status {
-	case StatusOpen:
-		return "#6c757d" // Gray
+	case StatusDraft, StatusOpen:
+		return "#95a5a6" // Gray (neutral)
 	case StatusInProgress:
-		return "#ffc107" // Warning yellow
+		return "#f39c12" // Orange (working)
 	case StatusResolved:
-		return "#28a745" // Success green
+		return "#2ecc71" // Green (done)
 	case StatusVerified:
-		return "#20c997" // Teal
+		return "#1abc9c" // Teal (verified/QA passed)
 	case StatusClosed:
-		return "#6f42c1" // Purple
+		return "#9b59b6" // Purple (archived/closed)
 	case StatusRejected:
-		return "#dc3545" // Danger red
+		return "#e74c3c" // Red (rejected)
 	case StatusReopened:
-		return "#fd7e14" // Orange
+		return "#e67e22" // Carrot orange (reopened)
 	default:
-		return "#6c757d" // Default gray
+		return "#7f8c8d" // Default gray
 	}
 }
 
@@ -149,7 +149,7 @@ func IsActiveStatus(status Status) bool {
 func GetNextPossibleStatuses(currentStatus Status) []Status {
 	validTransitions := map[Status][]Status{
 		StatusDraft:      {StatusOpen},
-		StatusOpen:       {StatusInProgress, StatusClosed},
+		StatusOpen:       {StatusInProgress},
 		StatusInProgress: {StatusResolved},
 		StatusResolved:   {StatusVerified},
 		StatusVerified:   {StatusClosed, StatusRejected},

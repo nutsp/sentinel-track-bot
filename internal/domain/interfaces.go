@@ -54,6 +54,9 @@ type IssueService interface {
 	// InProgressIssue starts working on an issue
 	InProgressIssue(ctx context.Context, id uuid.UUID) error
 
+	// VerifiedIssue verifies an issue
+	VerifiedIssue(ctx context.Context, id uuid.UUID) error
+
 	// ReopenIssue reopens a closed issue
 	ReopenIssue(ctx context.Context, id uuid.UUID) error
 
@@ -68,6 +71,9 @@ type IssueService interface {
 
 	// UpdateIssueMessageID updates just the message ID for an issue
 	UpdateIssueMessageID(ctx context.Context, id uuid.UUID, messageID string) error
+
+	// UpdateIssueResolved updates the resolved information for an issue
+	UpdateIssueResolved(ctx context.Context, id uuid.UUID, cause string, action string) error
 }
 
 // DiscordHandler defines the interface for Discord interaction handling

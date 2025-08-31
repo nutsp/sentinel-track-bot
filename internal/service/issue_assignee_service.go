@@ -41,18 +41,25 @@ func (s *issueAssigneeService) AssignUserToIssue(ctx context.Context, issueID uu
 
 	// Get user by Discord ID
 	user, err := s.userRepo.GetByDiscordID(ctx, discordID)
-	if err != nil {
-		if err == domain.ErrUserNotFound {
-			s.logger.Error("User not found by Discord ID",
-				zap.String("discord_id", discordID),
-			)
-			return nil, domain.ErrUserNotFound
-		}
+	if err != nil && err != domain.ErrUserNotFound {
 		s.logger.Error("Failed to get user by Discord ID",
 			zap.Error(err),
 			zap.String("discord_id", discordID),
 		)
 		return nil, err
+	} else if err == domain.ErrUserNotFound { // Create new user
+		user = &domain.User{
+			ID:        uuid.New(),
+			DiscordID: discordID,
+			Role:      domain.UserRoleSupport,
+		}
+		if err := s.userRepo.Create(ctx, user); err != nil {
+			s.logger.Error("Failed to create user",
+				zap.Error(err),
+				zap.String("discord_id", discordID),
+			)
+			return nil, err
+		}
 	}
 
 	// Check if this assignment already exists

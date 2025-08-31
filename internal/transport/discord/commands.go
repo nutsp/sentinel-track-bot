@@ -41,9 +41,7 @@ func (cm *CommandManager) getCommandDefinitions() []*discordgo.ApplicationComman
 					Choices: []*discordgo.ApplicationCommandOptionChoice{
 						{Name: "🔵 Open", Value: "open"},
 						{Name: "🔷 In Progress", Value: "in_progress"},
-						{Name: "🟡 In Progress", Value: "in_progress"},
 						{Name: "🟢 Resolved", Value: "resolved"},
-						{Name: "🔷 Verified", Value: "verified"},
 						{Name: "✅ Verified", Value: "verified"},
 						{Name: "🟣 Closed", Value: "closed"},
 						{Name: "🔴 Rejected", Value: "rejected"},
@@ -77,144 +75,6 @@ func (cm *CommandManager) getCommandDefinitions() []*discordgo.ApplicationComman
 			},
 		},
 
-		// Workflow Commands - Development Phase
-		{
-			Name:        "assign-dev",
-			Description: "Assign issue to developer (Open → In Progress)",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "issue_id",
-					Description: "Issue ID to assign",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionUser,
-					Name:        "developer",
-					Description: "Developer to assign",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "start-work",
-			Description: "Start working on issue (In Progress → Resolved)",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "issue_id",
-					Description: "Issue ID to start working on",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "resolve-issue",
-			Description: "Mark issue as resolved (In Progress → Resolved)",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "issue_id",
-					Description: "Issue ID to resolve",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "resolution",
-					Description: "How the issue was resolved",
-					Required:    false,
-				},
-			},
-		},
-
-		// Workflow Commands - QA Phase
-		{
-			Name:        "assign-qa",
-			Description: "Assign issue to QA tester (Resolved → Verified)",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "issue_id",
-					Description: "Issue ID to assign for testing",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionUser,
-					Name:        "qa_tester",
-					Description: "QA tester to assign",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "verify-issue",
-			Description: "Verify issue fix (Verified → Closed)",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "issue_id",
-					Description: "Issue ID to verify",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "notes",
-					Description: "QA verification notes",
-					Required:    false,
-				},
-			},
-		},
-		{
-			Name:        "reject-issue",
-			Description: "Reject issue fix (Verified → Rejected)",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "issue_id",
-					Description: "Issue ID to reject",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "reason",
-					Description: "Reason for rejection",
-					Required:    true,
-				},
-			},
-		},
-
-		// Final Actions
-		{
-			Name:        "close-issue",
-			Description: "Close issue (Verified → Closed)",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "issue_id",
-					Description: "Issue ID to close",
-					Required:    true,
-				},
-			},
-		},
-		{
-			Name:        "reopen-issue",
-			Description: "Reopen closed issue (Closed → Reopened)",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "issue_id",
-					Description: "Issue ID to reopen",
-					Required:    true,
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "reason",
-					Description: "Reason for reopening",
-					Required:    false,
-				},
-			},
-		},
-
 		// Utility Commands
 		{
 			Name:        "my-issues",
@@ -239,6 +99,10 @@ func (cm *CommandManager) getCommandDefinitions() []*discordgo.ApplicationComman
 		},
 
 		// Setup Commands
+		{
+			Name:        "init",
+			Description: "Initialize this channel for issue tracking with customer and project information",
+		},
 		{
 			Name:        "register",
 			Description: "Register this channel for issue tracking with customer and project information",
@@ -315,7 +179,8 @@ func (cm *CommandManager) CleanupCommands() error {
 
 	// Delete each command
 	for _, command := range commands {
-		err := cm.session.ApplicationCommandDelete(cm.session.State.User.ID, "", command.ID)
+
+		err := cm.session.ApplicationCommandDelete(cm.session.State.User.ID, command.GuildID, command.ID)
 		if err != nil {
 			cm.logger.Error("Failed to delete command",
 				zap.Error(err),
