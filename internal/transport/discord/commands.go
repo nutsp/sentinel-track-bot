@@ -31,36 +31,7 @@ func (cm *CommandManager) getCommandDefinitions() []*discordgo.ApplicationComman
 		},
 		{
 			Name:        "issues",
-			Description: "List issues in this channel with filters",
-			Options: []*discordgo.ApplicationCommandOption{
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "status",
-					Description: "Filter by status",
-					Required:    false,
-					Choices: []*discordgo.ApplicationCommandOptionChoice{
-						{Name: "🔵 Open", Value: "open"},
-						{Name: "🔷 In Progress", Value: "in_progress"},
-						{Name: "🟢 Resolved", Value: "resolved"},
-						{Name: "✅ Verified", Value: "verified"},
-						{Name: "🟣 Closed", Value: "closed"},
-						{Name: "🔴 Rejected", Value: "rejected"},
-						{Name: "🟠 Reopened", Value: "reopened"},
-					},
-				},
-				{
-					Type:        discordgo.ApplicationCommandOptionString,
-					Name:        "role",
-					Description: "Filter by assignee role",
-					Required:    false,
-					Choices: []*discordgo.ApplicationCommandOptionChoice{
-						{Name: "👨‍💻 Developer", Value: "dev"},
-						{Name: "🧪 QA Tester", Value: "qa"},
-						{Name: "👀 Reviewer", Value: "reviewer"},
-						{Name: "👤 Other", Value: "other"},
-					},
-				},
-			},
+			Description: "List issues in this channel",
 		},
 		{
 			Name:        "issue-status",

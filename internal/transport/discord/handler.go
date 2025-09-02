@@ -89,7 +89,6 @@ func (h *Handler) handleSlashCommand(ctx context.Context, i *discordgo.Interacti
 		zap.String("user_id", i.Member.User.ID),
 		zap.String("channel_id", i.ChannelID),
 		zap.String("channel_name", ch.Name),
-		zap.Any("data", ch),
 	)
 
 	switch commandName {
@@ -97,8 +96,8 @@ func (h *Handler) handleSlashCommand(ctx context.Context, i *discordgo.Interacti
 		h.handleIssueCommand(ctx, i)
 	case "issues":
 		h.handleIssuesCommand(ctx, i)
-	case "issue-status":
-		h.handleIssueStatusCommand(ctx, i)
+	// case "issue-status":
+	// 	h.handleIssueStatusCommand(ctx, i)
 	case "init":
 		h.handleInitCommand(ctx, i)
 	case "register":
@@ -201,9 +200,7 @@ func (h *Handler) handleIssuesCommand(ctx context.Context, i *discordgo.Interact
 		}
 
 		// Status emoji
-		statusEmoji := "🟢"
 		if issue.Status == domain.StatusClosed {
-			statusEmoji = "🔴"
 			closedCount++
 		} else {
 			openCount++
@@ -221,9 +218,9 @@ func (h *Handler) handleIssuesCommand(ctx context.Context, i *discordgo.Interact
 		// Format creation time
 		createdTime := issue.CreatedAt.Format("Jan 2, 2006")
 
-		content.WriteString(fmt.Sprintf("%s %s **%s**\n", statusEmoji, priorityEmoji, issue.Title))
-		content.WriteString(fmt.Sprintf("   🆔 `%s` | 📅 %s | 👤 <@%s>\n",
-			issue.ID.String()[:8], createdTime, issue.ReporterID))
+		content.WriteString(fmt.Sprintf("%s **%s**\n", priorityEmoji, issue.Title))
+		content.WriteString(fmt.Sprintf("📅 %s | 👤 <@%s>\n",
+			createdTime, issue.Reporter.DiscordID))
 
 		if issue.ThreadID != "" {
 			content.WriteString(fmt.Sprintf("   💬 <#%s>\n", issue.ThreadID))

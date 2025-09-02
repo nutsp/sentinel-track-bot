@@ -127,7 +127,7 @@ func (r *issueRepository) GetByDiscordChannelID(ctx context.Context, discordChan
 		Preload("Reporter").
 		Preload("Assignee").
 		Joins("JOIN channels ON issues.channel_id = channels.id").
-		Where("channels.channel_id = ?", discordChannelID).
+		Where("channels.discord_channel_id = ?", discordChannelID).
 		Order("issues.created_at DESC").
 		Find(&issues).Error; err != nil {
 		r.logger.Error("Failed to retrieve issues by Discord channel ID",
